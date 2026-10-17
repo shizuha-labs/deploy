@@ -172,13 +172,23 @@ print('Created isolated acceptance users')
     api('GET', note_path, outsider, org=other_org, expected=(403, 404))
     note_bytes = b'Notes externally signed attachment acceptance\n'
     note_attachment = upload('/notes/api/attachments/', owner, note_bytes, org, {'note': note['id']})
-    assert download(note_attachment['file_url'], owner, org) == note_bytes
-    from object_storage_acceptance import require_private_object
-    require_private_object(note_attachment['file_url'])
     attachment_path = f'/notes/api/attachments/{note_attachment["id"]}/file/'
+    public_attachment = note_attachment['file_url']
+    parsed_attachment = urlsplit(public_attachment)
+    if (origin(public_attachment) != origin(BASE) or parsed_attachment.query
+            or parsed_attachment.fragment or parsed_attachment.path != attachment_path
+            or note_attachment.get('file') != public_attachment):
+        raise RuntimeError('Notes must expose only its authenticated attachment route')
+    assert download(public_attachment, owner, org) == note_bytes
+    public_path = urlsplit(public_attachment).path
+    api('GET', public_path, outsider, org=other_org, expected=(401, 403, 404))
+    api('GET', public_path, expected=(401, 403, 404))
+    from object_storage_acceptance import require_private_notes_attachment
+    require_private_notes_attachment(COMPOSE, note_attachment['id'], note['id'], org, note_bytes)
     assert download(attachment_path, owner, org) == note_bytes
     api('GET', attachment_path, outsider, org=other_org, expected=(403, 404))
-    print('PASS Notes create/read, external signed bytes and attachment tenant isolation', flush=True)
+    api('GET', attachment_path, expected=(401, 403, 404))
+    print('PASS Notes create/read, authenticated bytes, private backing object and tenant isolation', flush=True)
     conversation = api('POST', '/connect/api/conversations/', owner, {
         'conversation_type': 'group', 'name': 'Acceptance conversation', 'participant_ids': [],
     }, org)

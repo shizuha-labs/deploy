@@ -5,8 +5,6 @@ own machine. This repository contains the installer and a source lock for the
 reviewed public service repositories. The build fetches those exact commits;
 you do not need a Shizuha account or access to our infrastructure.
 
-**Release validation is in progress. This candidate is not yet published.**
-
 ## Requirements
 
 Use Linux amd64 with Git, Python 3.12 or newer, Docker Engine, and Docker Compose
@@ -20,6 +18,11 @@ inference endpoint and provider key. Mail delivery outside the installation
 requires your domain, DNS, TLS and SMTP configuration.
 
 ## Install
+
+The default gateway listens on `127.0.0.1:8080`. Before running the local setup
+helpers, ensure `shizuha.localhost` resolves to `127.0.0.1` on your machine. If
+needed, add `127.0.0.1 shizuha.localhost` to your hosts file. You can also choose
+your own hostname using the configuration below.
 
 ```sh
 git clone https://github.com/shizuha-labs/deploy.git shizuha-platform
@@ -43,9 +46,8 @@ There is no preset administrator password. Preparation generates fresh secrets i
 `installation/secrets.env` with owner-only permissions and refuses to overwrite an
 existing installation. Keep that file private and back it up.
 
-Open [your local platform](http://shizuha.localhost:8080). If your resolver does not
-resolve `.localhost`, add `127.0.0.1 shizuha.localhost` to your hosts file. Sign in
-with the administrator you just created. Use Admin to manage organizations and
+Open [your local platform](http://shizuha.localhost:8080). Sign in with the
+administrator you just created. Use Admin to manage organizations and
 membership, and ID to grant service access to other users.
 
 | Application | Local path |
