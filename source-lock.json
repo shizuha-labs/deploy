@@ -1,0 +1,65 @@
+{
+  "images": {
+    "k3s": "docker.io/rancher/k3s@sha256:71abd3a56f57884c62732e0e0d87606052cb5f8555b7db7e8e33c04570b8175c",
+    "mail_server": "docker.io/stalwartlabs/stalwart@sha256:254320d6d9af6bafce85fcf301aaa29fa0a4a07e2b91e19fe97588ecfb230fab",
+    "nginx": "docker.io/library/nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94",
+    "object_store": "docker.io/chrislusf/seaweedfs@sha256:f898c91e42d7da5f4bb13f1efd424ff03ba85b420312eb929708a384e8a8b03d",
+    "postgres": "docker.io/library/postgres@sha256:efedf3595f1d6f415c08568ba171029bf54052e754cc9f030e3f2412b21f3d67",
+    "redis": "docker.io/library/redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
+  },
+  "schema": 1,
+  "sources": {
+    "admin": {
+      "commit": "42d2964eafe89048b956a3828b78dc5727c1910d",
+      "url": "https://github.com/shizuha-labs/admin.git"
+    },
+    "atlas": {
+      "commit": "3bbffd1c57d87b943984514adf7e2314a1b094ae",
+      "url": "https://github.com/shizuha-labs/atlas.git"
+    },
+    "connect": {
+      "commit": "c07d60d80484de735bcde30d32211367b8019b8e",
+      "url": "https://github.com/shizuha-labs/connect.git"
+    },
+    "drive": {
+      "commit": "8d5dfad75c12cd28d5b4dc806dd5949232cccdb1",
+      "url": "https://github.com/shizuha-labs/drive.git"
+    },
+    "hive": {
+      "commit": "a5dd400cc66f460a44c8fd35b3e5ddb4a6a41ac4",
+      "url": "https://github.com/shizuha-labs/hive.git"
+    },
+    "home": {
+      "commit": "1adaf6ce0d899e11224e1bb6bfc9504e25b26980",
+      "url": "https://github.com/shizuha-labs/home.git"
+    },
+    "id": {
+      "commit": "48926e36438e04dcb3a8ebbcfe00eab862682d56",
+      "url": "https://github.com/shizuha-labs/id.git"
+    },
+    "mail": {
+      "commit": "ce0432d642a63030aea60f4b80ee47bd3ae291d1",
+      "url": "https://github.com/shizuha-labs/mail.git"
+    },
+    "notes": {
+      "commit": "ad6e29cf1f0a25ece31b924b5ecfc41e19e76ef0",
+      "url": "https://github.com/shizuha-labs/notes.git"
+    },
+    "packages": {
+      "commit": "e67991abab5b11263fa21dc0706c6286f4142197",
+      "url": "https://github.com/shizuha-labs/platform-packages.git"
+    },
+    "pulse": {
+      "commit": "d3e41f05a4e7f88c7fbd448ee6d9bc8e2a0370ec",
+      "url": "https://github.com/shizuha-labs/pulse.git"
+    },
+    "runtime": {
+      "commit": "25bb59ca83787620128b32be8f9eabedb55b6e83",
+      "url": "https://github.com/shizuha-labs/shizuha.git"
+    },
+    "wiki": {
+      "commit": "da9146ccc15355a684009586feb26f87c09f222d",
+      "url": "https://github.com/shizuha-labs/wiki.git"
+    }
+  }
+}
