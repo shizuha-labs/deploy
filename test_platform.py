@@ -58,8 +58,62 @@ class InstallationTest(unittest.TestCase):
             self.assertIn('VITE_BASE_PATH=/ VITE_API_BASE=/api', frontend)
             self.assertIn('npm ci --ignore-scripts', frontend)
             self.assertNotIn('npm install', frontend)
-            self.assertNotIn('/packages/', frontend, 'frontend consumes reviewed vendor tarballs, never host source')
+            self.assertIn('COPY packages/shizuha-ui /workspace/packages/shizuha-ui', frontend)
+            self.assertIn('COPY packages/shizuha-chat /workspace/packages/shizuha-chat', frontend)
             self.assertNotIn('DB_PASSWORD_HOME', (out / 'secrets.env').read_text())
+
+    def test_generated_home_copy_context_preserves_locked_local_package_targets(self):
+        # Execute the generated COPY/WORKDIR geometry against an isolated source
+        # context. A flattened /app consumer resolves ../../packages outside it.
+        import shlex
+        import shutil
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context, stage = root / 'sources', root / 'stage'
+            frontend = context / 'home/frontend'
+            frontend.mkdir(parents=True)
+            dependencies = {f'@shizuha/{name}': f'file:../../packages/shizuha-{name}'
+                            for name in ('ui', 'chat')}
+            (frontend / 'package.json').write_text(json.dumps({'dependencies': dependencies}))
+            (context / 'home/nginx.prod.conf').write_text('# reviewed source guard fixture')
+            for name in ('ui', 'chat'):
+                package = context / f'packages/shizuha-{name}'
+                (package / 'src').mkdir(parents=True)
+                (package / 'package.json').write_text(json.dumps({'name': f'@shizuha/{name}'}))
+                (package / 'package-lock.json').write_text('{"lockfileVersion": 3}')
+            workdir = stage
+            installs = []
+            for line in platform.frontend_dockerfile('home').splitlines():
+                fields = shlex.split(line)
+                if not fields:
+                    continue
+                if fields[0] == 'FROM' and 'build' not in fields:
+                    break
+                if fields[0] == 'WORKDIR':
+                    workdir = stage / fields[1].lstrip('/')
+                    workdir.mkdir(parents=True, exist_ok=True)
+                elif fields[0] == 'COPY':
+                    source = context / fields[1]
+                    target = stage / fields[2].lstrip('/') if fields[2].startswith('/') else workdir / fields[2]
+                    if source.is_dir():
+                        shutil.copytree(source, target, dirs_exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(source, target)
+                elif fields[0] == 'RUN' and 'npm ci' in line:
+                    installs.append(line)
+                    if fields[1] == 'cd':
+                        package = stage / fields[2].lstrip('/')
+                        self.assertTrue((package / 'package-lock.json').is_file())
+                    else:
+                        actual = json.loads((workdir / 'package.json').read_text())
+                        for name, reference in actual['dependencies'].items():
+                            target = (workdir / reference.removeprefix('file:')).resolve()
+                            self.assertTrue(target.is_relative_to(stage), name)
+                            self.assertEqual(json.loads((target / 'package.json').read_text())['name'], name)
+                            self.assertTrue((target / 'src').is_dir())
+            self.assertEqual(len(installs), 3)
+            self.assertIn('COPY --from=build /workspace/home/frontend/dist /usr/share/nginx/html', platform.frontend_dockerfile('home'))
 
     def test_installer_directory_does_not_shadow_uuid_platform_dependency(self):
         check = "import uuid, platform; assert uuid.uuid4().version == 4; assert platform.system()"

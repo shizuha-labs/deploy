@@ -85,19 +85,28 @@ RUN mkdir -p /var/log/django /var/log/supervisor /app/media /app/staticfiles
 def frontend_dockerfile(name):
     base = '/' if name == 'home' else f'/{name}/'
     api = '/api' if name == 'home' else f'/{name}/api'
-    build_inputs = ('COPY home/nginx.prod.conf /nginx.prod.conf\n'
-                    'ARG VITE_HOME_OPERATOR_USER_IDS=\nARG VITE_HOME_OPERATOR_AGENT=\n'
-                    'ENV VITE_HOME_OPERATOR_USER_IDS=$VITE_HOME_OPERATOR_USER_IDS VITE_HOME_OPERATOR_AGENT=$VITE_HOME_OPERATOR_AGENT\n'
-                    if name == 'home' else '')
+    workdir = '/workspace/home/frontend' if name == 'home' else '/app'
+    build_inputs = ("""ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+COPY packages/shizuha-ui /workspace/packages/shizuha-ui
+COPY packages/shizuha-chat /workspace/packages/shizuha-chat
+ENV SHIZUHA_PACKAGES_DIR=/workspace/packages
+RUN cd /workspace/packages/shizuha-ui && npm ci --ignore-scripts --omit=dev
+RUN cd /workspace/packages/shizuha-chat && npm ci --ignore-scripts --omit=dev
+RUN rm -rf /workspace/packages/shizuha-ui/node_modules/react /workspace/packages/shizuha-ui/node_modules/react-dom /workspace/packages/shizuha-chat/node_modules/react /workspace/packages/shizuha-chat/node_modules/react-dom
+COPY home/nginx.prod.conf /workspace/home/nginx.prod.conf
+ARG VITE_HOME_OPERATOR_USER_IDS=
+ARG VITE_HOME_OPERATOR_AGENT=
+ENV VITE_HOME_OPERATOR_USER_IDS=$VITE_HOME_OPERATOR_USER_IDS VITE_HOME_OPERATOR_AGENT=$VITE_HOME_OPERATOR_AGENT
+""" if name == 'home' else '')
+    build_context = (build_inputs + f'COPY {name}/frontend/ ./\n' if name == 'home' else
+                     f'COPY {name}/frontend/ ./\nENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org/\n')
     return f'''FROM docker.io/library/node@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS build
-WORKDIR /app
-COPY {name}/frontend/ ./
-{build_inputs}ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
-RUN npm ci --ignore-scripts
+WORKDIR {workdir}
+{build_context}RUN npm ci --ignore-scripts
 ENV VITE_BASE_PATH={base} VITE_API_BASE={api} VITE_LOGIN_URL=/id/login NODE_ENV=production
 RUN npm run build
 FROM docker.io/library/nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build {workdir}/dist /usr/share/nginx/html
 RUN printf '%s\\n' 'server {{ listen 80; root /usr/share/nginx/html; index index.html; location /health {{ return 200 "OK\\n"; }} location /assets/ {{ try_files $uri =404; }} location / {{ try_files $uri $uri/ /index.html; }} }}' > /etc/nginx/conf.d/default.conf
 '''
 
