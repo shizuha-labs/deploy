@@ -26,3 +26,41 @@ def require_private_object(signed_url):
             error.close()
         if status != 403:
             raise RuntimeError(f'{label} object request must return 403, got {status}')
+
+
+def require_private_notes_attachment(compose, attachment_id, note_id, organization_id, expected_bytes):
+    """Check this CI attachment's backing object without exposing its signed URL."""
+    import json
+    import subprocess
+    import uuid
+    attachment_id, note_id = str(uuid.UUID(str(attachment_id))), str(uuid.UUID(str(note_id)))
+    if isinstance(organization_id, bool) or not str(organization_id).isdigit() or int(organization_id) <= 0:
+        raise ValueError('Notes object proof requires an organization identity')
+    organization_id = int(organization_id)
+    code = '''import os, sys, json
+os.environ['DJANGO_SETTINGS_MODULE'] = 'notesmanager.settings'
+import django
+django.setup()
+from notes.models import Attachment
+attachment = Attachment.objects.get(pk=sys.argv[1], note_id=sys.argv[2], note__organization_id=int(sys.argv[3]))
+print(json.dumps({'attachment_id': str(attachment.pk), 'note_id': str(attachment.note_id), 'url': attachment.file.storage.url(attachment.file.name)}))
+'''
+    result = subprocess.run(list(compose) + ['exec', '-T', 'notes', 'python', '-c', code,
+                            attachment_id, note_id, str(organization_id)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    try:
+        if result.returncode or len(result.stdout) > 8192:
+            raise ValueError('unavailable object proof')
+        value = json.loads(result.stdout)
+        if (set(value) != {'attachment_id', 'note_id', 'url'}
+                or value['attachment_id'] != attachment_id or value['note_id'] != note_id
+                or not isinstance(value['url'], str)):
+            raise ValueError('object identity mismatch')
+        require_private_object(value['url'])
+        # No platform credentials, cookies, or organization headers go to S3.
+        with urlopen(Request(value['url']), timeout=30) as response:
+            if response.read(len(expected_bytes) + 1) != expected_bytes:
+                raise ValueError('object bytes mismatch')
+    except Exception:
+        # Neither subprocess output nor signed URLs belong in CI diagnostics.
+        raise RuntimeError('Notes backing object privacy proof failed') from None
