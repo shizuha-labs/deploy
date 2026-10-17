@@ -1,0 +1,50 @@
+{
+  "python": {
+    "tag": "3.12-slim",
+    "reference": "docker.io/library/python@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016",
+    "architectures": [
+      "386",
+      "amd64",
+      "arm",
+      "arm64",
+      "ppc64le",
+      "riscv64",
+      "s390x",
+      "unknown"
+    ]
+  },
+  "node": {
+    "tag": "22-alpine",
+    "reference": "docker.io/library/node@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402",
+    "architectures": [
+      "amd64",
+      "arm",
+      "arm64",
+      "s390x",
+      "unknown"
+    ]
+  },
+  "nginx": {
+    "tag": "stable-alpine",
+    "reference": "docker.io/library/nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94",
+    "architectures": [
+      "386",
+      "amd64",
+      "arm",
+      "arm64",
+      "ppc64le",
+      "riscv64",
+      "s390x",
+      "unknown"
+    ]
+  },
+  "uv": {
+    "tag": "0.11.26",
+    "reference": "ghcr.io/astral-sh/uv@sha256:3d868e555f8f1dbc324afa005066cd11e1053fc4743b9808ca8025283e65efa5",
+    "architectures": [
+      "amd64",
+      "arm64",
+      "unknown"
+    ]
+  }
+}
