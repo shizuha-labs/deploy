@@ -115,6 +115,59 @@ class InstallationTest(unittest.TestCase):
             self.assertEqual(len(installs), 3)
             self.assertIn('COPY --from=build /workspace/home/frontend/dist /usr/share/nginx/html', platform.frontend_dockerfile('home'))
 
+    def test_ci_hostname_mapping_matches_ipv4_publish_when_dns_is_ipv6_only(self):
+        import http.server
+        import socket
+        import threading
+        import urllib.request
+        spec = importlib.util.spec_from_file_location('installer_verify', Path(__file__).with_name('verify.py'))
+        verify = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verify)
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b'{}' if 'health' in self.path else b'<html>owned fixture</html>'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def log_message(self, *args):
+                pass
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hosts = root / 'hosts'
+            hosts.write_text('127.0.0.1 localhost\n::1 localhost\n')
+            binary = root / 'getent'
+            binary.write_text('#!/bin/sh\nprintf "%s\\n" "::1 shizuha.localhost"\n')
+            binary.chmod(0o700)
+            script = Path(__file__).with_name('ci-validate.sh').read_text()
+            start = script.index('export SHIZUHA_ACCEPTANCE_URL=')
+            end = script.index('python3 "$script_dir/selfhost.py" prepare')
+            # Only redirect the actual hosts-file write into this owned fixture.
+            block = script[start:end].replace('/etc/hosts', str(hosts))
+            env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH']}
+            subprocess.run(['bash', '-eu', '-c', block], env=env, check=True)
+            first = hosts.read_bytes()
+            subprocess.run(['bash', '-eu', '-c', block], env=env, check=True)
+            self.assertEqual(hosts.read_bytes(), first, 'host registration must be idempotent')
+            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            resolve = socket.getaddrinfo
+            def fixture_resolver(host, port, *args, **kwargs):
+                if host == 'shizuha.localhost':
+                    mapped = any(parts[0] == '127.0.0.1' and host in parts[1:]
+                                 for line in hosts.read_text().splitlines()
+                                 if (parts := line.split('#', 1)[0].split()))
+                    host = '127.0.0.1' if mapped else '::1'
+                return resolve(host, port, *args, **kwargs)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            try:
+                with patch.object(socket, 'getaddrinfo', side_effect=fixture_resolver), patch.object(verify, 'urlopen', opener.open):
+                    checks = verify.check(f'http://shizuha.localhost:{server.server_port}')
+                self.assertEqual(len(checks), 22)
+            finally:
+                server.shutdown(); server.server_close(); thread.join()
+
     def test_installer_directory_does_not_shadow_uuid_platform_dependency(self):
         check = "import uuid, platform; assert uuid.uuid4().version == 4; assert platform.system()"
         subprocess.run([sys.executable, '-c', check], cwd=Path(__file__).parent, check=True)

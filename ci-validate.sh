@@ -17,9 +17,17 @@ project="shizuha-oss-ci-${CI_RUN_ID}"
 project=${project,,}
 project=${project//[^a-z0-9_-]/-}
 export SHIZUHA_ACCEPTANCE_URL=http://shizuha.localhost:8080
-if ! getent hosts shizuha.localhost >/dev/null; then
-  echo "127.0.0.1 shizuha.localhost" >>/etc/hosts
-fi
+# The gateway publishes IPv4 loopback only. An existing DNS AAAA answer
+# (for example ::1) is not proof that this private CI hostname reaches it.
+python3 - <<'PYHOSTS'
+from pathlib import Path
+hosts = Path('/etc/hosts')
+entries = [line.split('#', 1)[0].split() for line in hosts.read_text().splitlines()]
+if not any(parts and parts[0] == '127.0.0.1' and 'shizuha.localhost' in parts[1:]
+           for parts in entries):
+    with hosts.open('a') as stream:
+        stream.write('\n127.0.0.1 shizuha.localhost\n')
+PYHOSTS
 python3 "$script_dir/selfhost.py" prepare --lock "$release_lock" --output "$output"
 python3 - "$script_dir" "$release_lock" "$output" <<'PYDELIVERY'
 import os, sys
