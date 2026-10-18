@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
 PORTS = {'id': 8001, 'admin': 8003, 'hive': 8030, 'pulse': 8002,
          'connect': 8019, 'wiki': 8013, 'atlas': 8080, 'notes': 8012,
@@ -28,6 +29,55 @@ def endpoint_objects(namespace, name, address, port):
          'addressType': 'IPv4', 'ports': [{'name': 'http', 'port': port, 'protocol': 'TCP'}],
          'endpoints': [{'addresses': [address], 'conditions': {'ready': True}}]},
     ]
+
+
+def dns_a_answers(output, hostname):
+    """Read only the answer section of the pinned BusyBox nslookup output.
+
+    The leading Server/Address pair identifies the resolver, never an answer.
+    Only an exact queried name and IPv4 A answers can acknowledge this zone.
+    """
+    answers = set()
+    in_answer = False
+    for line in output.decode('ascii', errors='replace').splitlines():
+        key, separator, value = line.strip().partition(':')
+        if not separator:
+            continue
+        if key == 'Name':
+            if value.strip().rstrip('.').lower() != hostname.rstrip('.').lower():
+                return set()
+            in_answer = True
+        elif key == 'Address' and in_answer:
+            try:
+                address = ipaddress.ip_address(value.strip())
+            except ValueError:
+                return set()
+            if address.version != 4:
+                return set()
+            answers.add(str(address))
+    return answers
+
+
+def acknowledge_runtime_dns(compose, resolver, hostname, gateway, deadline):
+    # Query the dedicated cluster Service from its own network namespace. A
+    # Ready CoreDNS Deployment can still be serving its previous configuration
+    # while the optional custom ConfigMap is projected and gracefully reloaded.
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            result = subprocess.run(compose + ['exec', '-T', 'runtime-cluster',
+                'nslookup', '-type=A', hostname, resolver], capture_output=True,
+                timeout=min(10, remaining))
+        except subprocess.TimeoutExpired:
+            result = None
+        if result is not None and result.returncode == 0 and dns_a_answers(result.stdout, hostname) == {gateway}:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(1, remaining))
+    # Never include resolver output: unexpected records or diagnostics need not
+    # become public acceptance logs. No authentication or mint is attempted.
+    raise RuntimeError('Runtime DNS did not acknowledge the expected gateway within the existing readiness budget')
 
 
 def main():
@@ -99,7 +149,18 @@ def main():
     ]
     run(kube + ['apply', '-f', '-'], json.dumps({'apiVersion': 'v1', 'kind': 'List', 'items': objects}).encode())
     run(kube + ['label', 'node/selfhost-runtime', 'shizuha.io/platform=true', '--overwrite'])
+    deadline = time.monotonic() + 180
     run(kube + ['rollout', 'status', 'deployment/coredns', '-n', 'kube-system', '--timeout=180s'])
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError('Runtime DNS did not acknowledge the expected gateway within the existing readiness budget')
+    service = json.loads(run(kube + ['get', 'service/kube-dns', '-n', 'kube-system', '-o', 'json'], timeout=remaining))
+    if service.get('metadata', {}).get('name') != 'kube-dns' or service.get('metadata', {}).get('namespace') != 'kube-system':
+        raise RuntimeError('Unexpected dedicated runtime DNS Service identity')
+    resolver = ipaddress.ip_address(service['spec']['clusterIP'])
+    if resolver.version != 4:
+        raise RuntimeError('Dedicated runtime DNS Service requires the installation IPv4 network')
+    acknowledge_runtime_dns(compose, str(resolver), public_host, gateway, deadline)
     print('Dedicated Hive runtime initialized from the locked public source; agent-launch acceptance still required')
 
 

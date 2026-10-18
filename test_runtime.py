@@ -106,5 +106,98 @@ class RuntimeContractTest(unittest.TestCase):
             runtime_setup.endpoint_objects('shizuha', 'shizuha-drive', 'operator.private.example', 8018)
 
 
+class RuntimeDNSActivationTest(unittest.TestCase):
+    """Exercise the real setup entrypoint across existing subprocess boundaries."""
+    def invoke(self, answers, rollout_elapsed=0, query_timeout=False):
+        import contextlib
+        import io
+        import subprocess
+        from types import SimpleNamespace
+        commands = []
+        applied = []
+        clock = [0.0]
+        responses = iter(answers)
+        last = [answers[-1]]
+        class Export:
+            def __enter__(self):
+                self.stdout = io.BytesIO(b'synthetic image')
+                return self
+            def __exit__(self, *args):
+                pass
+            def wait(self, timeout=None):
+                return 0
+        def run(command, **kwargs):
+            commands.append(command)
+            out = b''
+            rc = 0
+            if command[-2:] == ['-f', '-']:
+                applied.extend(json.loads(kwargs['input'])['items'])
+            if command[-1] == '/etc/rancher/k3s/k3s.yaml':
+                out = b'server: https://127.0.0.1:6443\n'
+            if command[-3:-1] == ['python', '-c']:
+                out = json.dumps({n: '172.22.0.' + str(i + 2)
+                    for i, n in enumerate(list(runtime_setup.PORTS) + ['gateway'])}).encode()
+            if 'get' in command and 'service/kube-dns' in command:
+                out = json.dumps({'metadata': {'name': 'kube-dns', 'namespace': 'kube-system'},
+                                  'spec': {'clusterIP': '10.43.0.10'}}).encode()
+            if 'rollout' in command:
+                clock[0] += rollout_elapsed
+            if 'nslookup' in command:
+                self.assertLessEqual(kwargs['timeout'], 180 - clock[0])
+                if query_timeout:
+                    clock[0] += kwargs['timeout']
+                    raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+                self.assertEqual(command[-4:], ['nslookup', '-type=A', 'synthetic.invalid', '10.43.0.10'])
+                self.assertTrue(any(x['kind'] == 'ConfigMap' and
+                    x['metadata']['name'] == 'coredns-custom' for x in applied))
+                last[0] = next(responses, last[0])
+                rc, out = last[0]
+            return subprocess.CompletedProcess(command, rc, out, b'synthetic diagnostic')
+        def sleep(seconds):
+            clock[0] += seconds
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'runtime').mkdir()
+            (root / 'runtime/keyring.json').write_text('{}')
+            (root / 'runtime.json').write_text(json.dumps({'agent_image': 'synthetic-agent',
+                'broker_image': 'synthetic-broker', 'public_hostname': 'synthetic.invalid'}))
+            with patch('sys.argv', ['runtime_setup.py', str(root), '--project', 'synthetic']), \
+                 patch.object(runtime_setup.subprocess, 'run', side_effect=run), \
+                 patch.object(runtime_setup.subprocess, 'Popen', side_effect=lambda *a, **kw: Export()), \
+                 patch.object(runtime_setup, 'time', SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep), create=True), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                runtime_setup.main()
+        return commands
+
+    @staticmethod
+    def answer(address, host='synthetic.invalid'):
+        return ('Server: 10.43.0.10\nAddress: 10.43.0.10:53\n\n'
+                'Name: ' + host + '\nAddress: ' + address + '\n').encode()
+
+    def test_main_waits_for_installed_zone_after_ready_deployment(self):
+        commands = self.invoke([(1, b'NXDOMAIN'), (0, self.answer('172.22.0.12'))])
+        self.assertEqual(sum('nslookup' in c for c in commands), 2)
+
+    def test_main_refuses_unactivated_zone_with_existing_ready_deployment(self):
+        with self.assertRaisesRegex(RuntimeError, 'DNS.*expected gateway'):
+            self.invoke([(1, b'NXDOMAIN')])
+
+    def test_main_exhausted_rollout_budget_cannot_start_fresh_dns_budget(self):
+        with self.assertRaisesRegex(RuntimeError, 'DNS.*expected gateway'):
+            self.invoke([(0, self.answer('172.22.0.12'))], rollout_elapsed=180)
+
+    def test_main_dns_timeout_stays_in_existing_total_budget(self):
+        with self.assertRaisesRegex(RuntimeError, 'DNS.*expected gateway'):
+            self.invoke([(0, self.answer('172.22.0.12'))], rollout_elapsed=175, query_timeout=True)
+
+    def test_main_refuses_wrong_a_and_dns_server_address_false_positive(self):
+        for answer in (self.answer('192.0.2.99'),
+                       b'Server: 172.22.0.12\nAddress: 172.22.0.12:53\n',
+                       self.answer('172.22.0.12', 'other.invalid'),
+                       self.answer('172.22.0.12') + b'Address: 192.0.2.99\n'):
+            with self.subTest(answer=answer), self.assertRaisesRegex(RuntimeError, 'DNS.*expected gateway'):
+                self.invoke([(0, answer)])
+
+
 if __name__ == '__main__':
     unittest.main()
